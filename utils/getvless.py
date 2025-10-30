@@ -153,11 +153,25 @@ def get_node():
 
 
 if __name__ == '__main__':
-    api = os.environ['vless_api']
-    private_key = os.environ['vless_private_key']
-    authorization = os.environ['vless_authorization']
-    text = os.environ['vless_text']
-    invite(api)
-    get_node()
-    message = '#vless ' + '#订阅' + '\n' + datetime.now().strftime("%Y年%m月%d日%H:%M:%S") + '\n' + 'vless订阅每天自动更新：' + '\n' + 'https://raw.githubusercontent.com/Huibq/TrojanLinks/master/links/vless'
-    send_message(os.environ['chat_id'], message, os.environ['bot_token'])
+    api = os.environ.get('vless_api')
+    private_key = os.environ.get('vless_private_key')
+    authorization = os.environ.get('vless_authorization')
+    text = os.environ.get('vless_text')
+
+    required_env = {
+        'vless_api': api,
+        'vless_private_key': private_key,
+        'vless_authorization': authorization,
+        'vless_text': text,
+        'chat_id': os.environ.get('chat_id'),
+        'bot_token': os.environ.get('bot_token'),
+    }
+
+    missing = [name for name, value in required_env.items() if not value]
+    if missing:
+        print(f"Skipping VLESS update: missing environment variables {', '.join(missing)}")
+    else:
+        invite(api)
+        get_node()
+        message = '#vless ' + '#订阅' + '\n' + datetime.now().strftime("%Y年%m月%d日%H:%M:%S") + '\n' + 'vless订阅每天自动更新：' + '\n' + 'https://raw.githubusercontent.com/Huibq/TrojanLinks/master/links/vless'
+        send_message(required_env['chat_id'], message, required_env['bot_token'])
