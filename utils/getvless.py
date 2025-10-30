@@ -10,8 +10,11 @@ import os
 import time
 import uuid
 from datetime import datetime
+from typing import Optional
+
 import requests
 import urllib3
+from urllib.parse import urljoin, urlparse
 from Crypto.PublicKey import RSA
 from Crypto.Cipher import PKCS1_OAEP
 from Crypto.Cipher import AES
@@ -22,9 +25,62 @@ from Telegram_bot import send_message
 
 urllib3.disable_warnings()
 
+INVITE_ENDPOINT = "/addRefereeToUserReferral/"
 
-def invite():
-    url = f'{api}/addRefereeToUserReferral/'
+
+def _normalise_base_url(candidate: Optional[str]) -> Optional[str]:
+    """Return an absolute base URL (scheme + host) or None when invalid."""
+    if not candidate:
+        return None
+
+    candidate = candidate.strip()
+    if not candidate:
+        return None
+
+    # Accept protocol-relative URLs such as //example.com
+    if candidate.startswith("//"):
+        candidate = f"https:{candidate}"
+
+    parsed = urlparse(candidate)
+    if parsed.scheme in {"http", "https"} and parsed.netloc:
+        return f"{parsed.scheme}://{parsed.netloc.rstrip('/')}"
+
+    # If no scheme/netloc, attempt to treat the value as a bare hostname.
+    if not parsed.scheme and not parsed.netloc and not candidate.startswith("/"):
+        parsed = urlparse(f"https://{candidate}")
+        if parsed.netloc:
+            return f"{parsed.scheme}://{parsed.netloc.rstrip('/')}"
+
+    return None
+
+
+def _coerce_base_url(candidate: Optional[str]) -> Optional[str]:
+    return _normalise_base_url(candidate)
+
+
+def _resolve_base_url(api_url: str) -> Optional[str]:
+    for key in ("BASE_URL", "VLESS_BASE_URL", "vless_base_url"):
+        base = _coerce_base_url(os.environ.get(key))
+        if base:
+            return base
+
+    api_base = _coerce_base_url(api_url)
+    if api_base:
+        return api_base
+
+    return None
+
+
+def invite(api_url: str):
+    base_url = _resolve_base_url(api_url)
+    if not base_url:
+        print(
+            "Invite skipped: unable to determine BASE_URL. Set BASE_URL/VLESS_BASE_URL "
+            "or provide a fully-qualified vless_api URL."
+        )
+        return
+
+    url = urljoin(base_url + '/', INVITE_ENDPOINT.lstrip('/'))
     headers = {
         'accept': 'application/json',
         'accept-charset': 'UTF-8',
@@ -42,8 +98,11 @@ def invite():
             'uniqueId': Id,
             'referralCode': 'D4GOLG'
         }
-        req = requests.post(url, data=data, headers=headers, verify=False)
-        print(req.text)
+        try:
+            req = requests.post(url, data=data, headers=headers, verify=False, timeout=15)
+            print(req.text)
+        except requests.RequestException as exc:
+            print(f"Invite request failed: {exc}")
         number += 1
         time.sleep(3)
 
@@ -109,11 +168,25 @@ def get_node():
 
 
 if __name__ == '__main__':
-    api = os.environ['vless_api']
-    private_key = os.environ['vless_private_key']
-    authorization = os.environ['vless_authorization']
-    text = os.environ['vless_text']
-    invite()
-    get_node()
-    message = '#vless ' + '#订阅' + '\n' + datetime.now().strftime("%Y年%m月%d日%H:%M:%S") + '\n' + 'vless订阅每天自动更新：' + '\n' + 'https://raw.githubusercontent.com/Huibq/TrojanLinks/master/links/vless'
-    send_message(os.environ['chat_id'], message, os.environ['bot_token'])
+    api = os.environ.get('vless_api')
+    private_key = os.environ.get('vless_private_key')
+    authorization = os.environ.get('vless_authorization')
+    text = os.environ.get('vless_text')
+
+    required_env = {
+        'vless_api': api,
+        'vless_private_key': private_key,
+        'vless_authorization': authorization,
+        'vless_text': text,
+        'chat_id': os.environ.get('chat_id'),
+        'bot_token': os.environ.get('bot_token'),
+    }
+
+    missing = [name for name, value in required_env.items() if not value]
+    if missing:
+        print(f"Skipping VLESS update: missing environment variables {', '.join(missing)}")
+    else:
+        invite(api)
+        get_node()
+        message = '#vless ' + '#订阅' + '\n' + datetime.now().strftime("%Y年%m月%d日%H:%M:%S") + '\n' + 'vless订阅每天自动更新：' + '\n' + 'https://raw.githubusercontent.com/Huibq/TrojanLinks/master/links/vless'
+        send_message(required_env['chat_id'], message, required_env['bot_token'])
