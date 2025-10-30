@@ -10,8 +10,11 @@ import os
 import time
 import uuid
 from datetime import datetime
+from typing import Optional
+
 import requests
 import urllib3
+from urllib.parse import urljoin, urlparse
 from Crypto.PublicKey import RSA
 from Crypto.Cipher import PKCS1_OAEP
 from Crypto.Cipher import AES
@@ -22,9 +25,47 @@ from Telegram_bot import send_message
 
 urllib3.disable_warnings()
 
+INVITE_ENDPOINT = "/addRefereeToUserReferral/"
 
-def invite():
-    url = f'{api}/addRefereeToUserReferral/'
+
+def _coerce_base_url(candidate: Optional[str]) -> Optional[str]:
+    if not candidate:
+        return None
+
+    candidate = candidate.strip()
+    if not candidate:
+        return None
+
+    parsed = urlparse(candidate)
+    if not parsed.scheme:
+        candidate = f"https://{candidate.lstrip('/')}"
+        parsed = urlparse(candidate)
+
+    if not parsed.scheme or not parsed.netloc:
+        return None
+
+    return f"{parsed.scheme}://{parsed.netloc}"
+
+
+def _resolve_base_url(api_url: str) -> Optional[str]:
+    env_base = _coerce_base_url(os.environ.get("BASE_URL"))
+    if env_base:
+        return env_base
+
+    api_base = _coerce_base_url(api_url)
+    if api_base:
+        return api_base
+
+    return None
+
+
+def invite(api_url: str):
+    base_url = _resolve_base_url(api_url)
+    if not base_url:
+        print("Invite skipped: unable to determine BASE_URL. Set BASE_URL or use a fully-qualified vless_api URL.")
+        return
+
+    url = urljoin(base_url + '/', INVITE_ENDPOINT.lstrip('/'))
     headers = {
         'accept': 'application/json',
         'accept-charset': 'UTF-8',
@@ -42,8 +83,11 @@ def invite():
             'uniqueId': Id,
             'referralCode': 'D4GOLG'
         }
-        req = requests.post(url, data=data, headers=headers, verify=False)
-        print(req.text)
+        try:
+            req = requests.post(url, data=data, headers=headers, verify=False, timeout=15)
+            print(req.text)
+        except requests.RequestException as exc:
+            print(f"Invite request failed: {exc}")
         number += 1
         time.sleep(3)
 
@@ -113,7 +157,7 @@ if __name__ == '__main__':
     private_key = os.environ['vless_private_key']
     authorization = os.environ['vless_authorization']
     text = os.environ['vless_text']
-    invite()
+    invite(api)
     get_node()
     message = '#vless ' + '#订阅' + '\n' + datetime.now().strftime("%Y年%m月%d日%H:%M:%S") + '\n' + 'vless订阅每天自动更新：' + '\n' + 'https://raw.githubusercontent.com/Huibq/TrojanLinks/master/links/vless'
     send_message(os.environ['chat_id'], message, os.environ['bot_token'])
